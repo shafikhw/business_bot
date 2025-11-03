@@ -1,0 +1,9 @@
+NeuraEstate is a UAE-based AI real estate technology company founded by Shafik Houeidi, an engineer with an MEng in Artificial Intelligence and Machine Learning from the American University of Beirut. The company specializes in applying advanced AI, predictive analytics, and natural language systems to modernize how real estate agencies, investors, and buyers interact with property data.
+
+NeuraEstate’s mission is to empower the UAE real estate ecosystem with intelligent automation that enables smarter, faster, and more transparent decision-making. Its suite of services includes an AI Property Matcher that recommends homes based on lifestyle and commute patterns, a Smart Valuation Engine for real-time property value estimation, and a Virtual Real Estate Assistant that handles customer inquiries and lead collection in multiple languages.
+
+Additional offerings such as the Market Intelligence Dashboard and Investor Portfolio Optimizer provide deep insights into neighborhood trends, investment risks, and long-term market forecasts.
+
+With a multidisciplinary Lebanese team of AI engineers, data scientists, and UX experts, NeuraEstate combines cutting-edge technology with regional expertise. Its unique strengths include localized AI models trained on UAE-specific data, explainable predictions, and seamless API integrations for agencies and property platforms.
+
+NeuraEstate’s vision is to redefine the real estate experience across the UAE and MENA region, making property discovery, investment, and management intelligent, personalized, and effortless.
