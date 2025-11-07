@@ -2,3 +2,5 @@
 *.mp4
 *.mov
 *.avi
+__pycache__/
+*.pyc
