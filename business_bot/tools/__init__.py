@@ -1,5 +1,6 @@
-"""Utility helpers for the business bot."""
 
+"""Tooling utilities for NeuraEstate business bot."""
+from .bayut import BayutToolset, BayutSearchResult
 from .maps import (
     MapEnrichmentResult,
     PointOfInterest,
@@ -18,4 +19,6 @@ __all__ = [
     "generate_static_map_url",
     "geocode_listing_location",
     "estimate_travel_times",
+    "BayutToolset", 
+    "BayutSearchResult"
 ]
