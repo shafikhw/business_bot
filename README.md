@@ -30,6 +30,8 @@ A production-ready AI-powered business assistant for **NeuraEstate**, a UAE-base
    ```env
    OPENAI_API_KEY=your-api-key-here
    PROVIDER=openai
+   MAPS_PROVIDER=mapbox
+   MAPBOX_ACCESS_TOKEN=your-mapbox-token
    ```
 
 4. **Run the app:**
@@ -93,6 +95,12 @@ business_bot/
 
 - `OPENAI_API_KEY` (required): Your OpenAI API key
 - `PROVIDER` (optional): LLM provider, defaults to "openai"
+- `MAPS_PROVIDER` (optional): Maps provider used for enrichment. Currently `mapbox` is supported and enabled by default.
+- `MAPBOX_ACCESS_TOKEN` (required when `MAPS_PROVIDER=mapbox`): Mapbox access token with Static Images and Matrix API permissions.
+- `MAPBOX_STATIC_STYLE` (optional): Override the Mapbox style used for static map images (defaults to `mapbox/streets-v12`).
+- `MAPBOX_PROFILE` (optional): Routing profile used for travel-time estimation (defaults to `mapbox/driving`).
+
+When map credentials are missing or temporarily unavailable, property recommendations still render but include a guardrail message letting users know that map details will be shared once the map service reconnects.
 
 ### Files Required
 
