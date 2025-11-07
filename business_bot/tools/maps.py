@@ -1,315 +1,240 @@
-"""Map and geocoding helpers built around the Mapbox APIs."""
+"""Utility helpers for enriching property listings with map context."""
+
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, MutableMapping, Optional, Sequence, Tuple
+import math
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
-import requests
+from urllib.parse import quote_plus
 
-from ..config import MissingMapCredentialError, settings
-
-LOGGER = logging.getLogger(__name__)
-
-MAPBOX_BASE_URL = "https://api.mapbox.com"
-MAPBOX_GEOCODING_URL = f"{MAPBOX_BASE_URL}/geocoding/v5/mapbox.places"
-MAPBOX_STATIC_URL = f"{MAPBOX_BASE_URL}/styles/v1"
-MAPBOX_MATRIX_URL = f"{MAPBOX_BASE_URL}/directions-matrix/v1"
+Coordinate = Tuple[float, float]
 
 
-class MapServiceUnavailable(RuntimeError):
-    """Raised when the configured maps provider cannot service a request."""
+def _coerce_coordinate(value: Any) -> Optional[float]:
+    """Attempt to coerce a latitude or longitude value to ``float``."""
 
-
-@dataclass(slots=True)
-class PointOfInterest:
-    """Representation of a user provided point of interest."""
-
-    name: str
-    latitude: float
-    longitude: float
-    profile: Optional[str] = None  # Allows overriding the default routing profile
-
-
-@dataclass(slots=True)
-class TravelTimeEstimate:
-    """A travel time estimation between an origin and a POI."""
-
-    name: str
-    distance_meters: Optional[float]
-    duration_minutes: Optional[float]
-
-
-@dataclass(slots=True)
-class MapEnrichmentResult:
-    """Container describing how a recommendation was enriched with map data."""
-
-    listing: MutableMapping[str, Any]
-    geocoding: Optional[Dict[str, Any]] = None
-    static_map_url: Optional[str] = None
-    travel_times: List[TravelTimeEstimate] = field(default_factory=list)
-    fallback_message: Optional[str] = None
-    error: Optional[str] = None
-
-
-def _is_mapbox_enabled() -> bool:
-    return settings.maps_provider.lower() == "mapbox"
-
-
-def _extract_coordinates(listing: MutableMapping[str, Any]) -> Optional[Tuple[float, float]]:
-    """Attempt to extract latitude/longitude pairs from a Bayut response payload."""
-
-    if not listing:
+    if value is None:
         return None
-
-    lat = None
-    lon = None
-
-    # Known Bayut response shapes
-    geography = listing.get("geography") if isinstance(listing, MutableMapping) else None
-    if isinstance(geography, MutableMapping):
-        lat = geography.get("lat") or geography.get("latitude")
-        lon = geography.get("lng") or geography.get("lon") or geography.get("longitude")
-
-    if lat is None or lon is None:
-        location = listing.get("location") if isinstance(listing, MutableMapping) else None
-        if isinstance(location, MutableMapping):
-            lat = lat or location.get("lat") or location.get("latitude")
-            lon = lon or location.get("lon") or location.get("lng") or location.get("longitude")
-
-    if lat is None or lon is None:
-        coords = listing.get("coordinates") if isinstance(listing, MutableMapping) else None
-        if isinstance(coords, (tuple, list)) and len(coords) >= 2:
-            lon = lon or coords[0]
-            lat = lat or coords[1]
-        elif isinstance(coords, MutableMapping):
-            lat = lat or coords.get("lat") or coords.get("latitude")
-            lon = lon or coords.get("lng") or coords.get("lon") or coords.get("longitude")
-
-    if lat is None or lon is None:
-        return None
-
+    if isinstance(value, (int, float)):
+        return float(value)
     try:
-        return float(lat), float(lon)
+        return float(str(value))
     except (TypeError, ValueError):
-        LOGGER.debug("Invalid coordinates found on listing: %s", listing)
         return None
 
 
-def _require_mapbox_token() -> str:
-    try:
-        return settings.require_mapbox_token()
-    except MissingMapCredentialError as exc:  # pragma: no cover - defensive guard
-        raise MapServiceUnavailable(str(exc)) from exc
+def _extract_coordinates(payload: Mapping[str, Any]) -> Optional[Coordinate]:
+    """Extract ``(latitude, longitude)`` pairs from known Bayut payload shapes."""
+
+    # Direct keys on the payload.
+    direct_lat = _coerce_coordinate(payload.get("latitude") or payload.get("lat"))
+    direct_lon = _coerce_coordinate(payload.get("longitude") or payload.get("lng") or payload.get("lon"))
+    if direct_lat is not None and direct_lon is not None:
+        return direct_lat, direct_lon
+
+    for key in ("geography", "geolocation", "geo", "location", "coordinates"):
+        nested = payload.get(key)
+        if isinstance(nested, Mapping):
+            lat = _coerce_coordinate(nested.get("lat") or nested.get("latitude"))
+            lon = _coerce_coordinate(nested.get("lng") or nested.get("lon") or nested.get("longitude"))
+            if lat is not None and lon is not None:
+                return lat, lon
+
+    return None
 
 
-def _request_mapbox(url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if not _is_mapbox_enabled():
-        raise MapServiceUnavailable("Mapbox provider is disabled in configuration.")
+@dataclass(frozen=True)
+class PointOfInterest:
+    """Simple representation of a nearby amenity or landmark."""
 
-    token = _require_mapbox_token()
-    params = dict(params or {})
-    params.setdefault("access_token", token)
+    name: str
+    category: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-    try:
-        response = requests.get(url, params=params, timeout=12)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:  # pragma: no cover - network failure guard
-        LOGGER.warning("Mapbox request failed: %s", exc)
-        raise MapServiceUnavailable("Unable to reach the map service at the moment.") from exc
+    def coordinates(self) -> Optional[Coordinate]:
+        """Return a coordinate tuple when both latitude and longitude are set."""
+
+        if self.latitude is None or self.longitude is None:
+            return None
+        return float(self.latitude), float(self.longitude)
 
 
-def geocode_listing_location(
-    listing: MutableMapping[str, Any], *, language: str = "en"
-) -> Optional[Dict[str, Any]]:
-    """Reverse geocode a Bayut listing using its coordinates."""
+@dataclass(frozen=True)
+class TravelTimeEstimate:
+    """Estimated travel time and distance for a given transport mode."""
 
-    if not _is_mapbox_enabled():
-        LOGGER.debug("Maps provider %s disabled, skipping geocoding", settings.maps_provider)
-        return None
+    destination: str
+    mode: str
+    distance_km: float
+    duration_minutes: float
+
+
+@dataclass(frozen=True)
+class MapEnrichmentResult:
+    """Aggregate map context for a specific property listing."""
+
+    listing_id: Any
+    coordinates: Optional[Coordinate]
+    static_map_url: Optional[str]
+    travel_times: Dict[str, List[TravelTimeEstimate]]
+
+
+def geocode_listing_location(listing: Mapping[str, Any]) -> Dict[str, Any]:
+    """Derive the best-effort geocode context for a Bayut listing payload."""
 
     coordinates = _extract_coordinates(listing)
-    if not coordinates:
-        LOGGER.debug("Listing does not contain coordinates, skipping geocoding")
-        return None
 
-    lat, lon = coordinates
-    query_url = f"{MAPBOX_GEOCODING_URL}/{lon},{lat}.json"
-    try:
-        payload = _request_mapbox(
-            query_url,
-            {
-                "types": "address,place,locality,region",
-                "language": language,
-                "limit": 1,
-            },
-        )
-    except MapServiceUnavailable:
-        return None
+    location_tree = listing.get("location_tree") if isinstance(listing, Mapping) else None
+    query: Optional[str] = None
+    if isinstance(location_tree, Sequence):
+        names = [node.get("name") for node in location_tree if isinstance(node, Mapping) and node.get("name")]
+        if names:
+            query = ", ".join(str(name) for name in names)
 
-    features = payload.get("features") or []
-    return features[0] if features else None
+    return {
+        "latitude": coordinates[0] if coordinates else None,
+        "longitude": coordinates[1] if coordinates else None,
+        "query": query,
+    }
 
 
-def generate_static_map_url(
-    latitude: float,
-    longitude: float,
-    *,
-    zoom: int = 14,
-    width: int = 640,
-    height: int = 360,
-    marker_color: str = "#2F855A",
-    marker_label: str = "A",
-) -> Optional[str]:
-    """Return a Mapbox static map image URL for the supplied coordinates."""
+def generate_static_map_url(listing: Mapping[str, Any]) -> Optional[str]:
+    """Generate a shareable Google Maps link based on listing coordinates."""
 
-    if not _is_mapbox_enabled():
-        return None
+    geocode = geocode_listing_location(listing)
+    lat = geocode.get("latitude")
+    lon = geocode.get("longitude")
+    if lat is not None and lon is not None:
+        return f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
 
-    token = _require_mapbox_token()
-    style = settings.mapbox_static_style
-    marker = f"pin-s-{marker_label}+{marker_color.replace('#', '')}({longitude},{latitude})"
-    dimensions = f"{max(1, width)}x{max(1, height)}"
+    if geocode.get("query"):
+        return f"https://www.google.com/maps/search/?api=1&query={quote_plus(str(geocode['query']))}"
 
-    return (
-        f"{MAPBOX_STATIC_URL}/{style}/static/{marker}/"
-        f"{longitude},{latitude},{zoom}/{dimensions}@2x?access_token={token}"
-    )
+    return None
+
+
+def _haversine_distance_km(origin: Coordinate, destination: Coordinate) -> float:
+    """Compute great-circle distance between two WGS84 coordinates."""
+
+    lat1, lon1 = origin
+    lat2, lon2 = destination
+    radius = 6371.0
+
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius * c
+
+
+def _normalise_poi(poi: Union[PointOfInterest, Mapping[str, Any]]) -> PointOfInterest:
+    """Coerce dictionary payloads into :class:`PointOfInterest` instances."""
+
+    if isinstance(poi, PointOfInterest):
+        return poi
+
+    name = str(poi.get("name", "POI"))
+    category = str(poi.get("category", "unknown"))
+    latitude = _coerce_coordinate(poi.get("latitude") or poi.get("lat"))
+    longitude = _coerce_coordinate(poi.get("longitude") or poi.get("lng") or poi.get("lon"))
+    metadata = {key: value for key, value in poi.items() if key not in {"name", "category", "latitude", "lat", "longitude", "lng", "lon"}}
+    return PointOfInterest(name=name, category=category, latitude=latitude, longitude=longitude, metadata=metadata or None)
+
+
+DEFAULT_SPEEDS_KMH = {
+    "walking": 5.0,
+    "cycling": 15.0,
+    "driving": 40.0,
+    "transit": 25.0,
+}
 
 
 def estimate_travel_times(
-    latitude: float,
-    longitude: float,
-    points_of_interest: Sequence[PointOfInterest],
+    origin: Optional[Coordinate],
+    destinations: Iterable[Union[PointOfInterest, Mapping[str, Any]]],
     *,
-    profile: Optional[str] = None,
-) -> List[TravelTimeEstimate]:
-    """Estimate travel times from the origin to each point of interest."""
+    modes: Optional[Iterable[str]] = None,
+) -> Dict[str, List[TravelTimeEstimate]]:
+    """Estimate travel time between an origin and a sequence of destinations."""
 
-    if not _is_mapbox_enabled() or not points_of_interest:
-        return []
+    if origin is None:
+        return {}
 
-    profile = profile or settings.mapbox_directions_profile
-    coordinates = [f"{longitude},{latitude}"] + [
-        f"{poi.longitude},{poi.latitude}" for poi in points_of_interest
-    ]
-    url = f"{MAPBOX_MATRIX_URL}/{profile}/" + ";".join(coordinates)
-    try:
-        payload = _request_mapbox(url, {"annotations": "duration,distance"})
-    except MapServiceUnavailable:
-        return []
+    modes = list(modes or DEFAULT_SPEEDS_KMH.keys())
+    results: Dict[str, List[TravelTimeEstimate]] = {}
 
-    durations = payload.get("durations") or []
-    distances = payload.get("distances") or []
+    for index, raw_destination in enumerate(destinations):
+        poi = _normalise_poi(raw_destination)
+        coords = poi.coordinates()
+        if coords is None:
+            continue
 
-    estimates: List[TravelTimeEstimate] = []
-    for index, poi in enumerate(points_of_interest, start=1):
-        duration = None
-        distance = None
+        distance = _haversine_distance_km(origin, coords)
+        destination_key = poi.name or f"destination_{index}"
+        estimates: List[TravelTimeEstimate] = []
 
-        if len(durations) > 0 and len(durations[0]) > index:
-            raw_duration = durations[0][index]
-            if raw_duration is not None:
-                duration = round(raw_duration / 60, 1)
-
-        if len(distances) > 0 and len(distances[0]) > index:
-            raw_distance = distances[0][index]
-            if raw_distance is not None:
-                distance = round(raw_distance, 1)
-
-        estimates.append(
-            TravelTimeEstimate(
-                name=poi.name,
-                distance_meters=distance,
-                duration_minutes=duration,
+        for mode in modes:
+            speed = DEFAULT_SPEEDS_KMH.get(mode)
+            if not speed or speed <= 0:
+                continue
+            duration_hours = distance / speed
+            estimates.append(
+                TravelTimeEstimate(
+                    destination=destination_key,
+                    mode=mode,
+                    distance_km=distance,
+                    duration_minutes=duration_hours * 60.0,
+                )
             )
-        )
 
-    return estimates
+        if estimates:
+            results[destination_key] = estimates
+
+    return results
 
 
 def enrich_recommendations_with_maps(
-    recommendations: Iterable[MutableMapping[str, Any]],
-    points_of_interest: Sequence[PointOfInterest],
+    listings: Iterable[Mapping[str, Any]],
     *,
-    fallback_message: str = (
-        "We're temporarily unable to load live map details. You'll still see the "
-        "property information while we reconnect to the map service."
-    ),
+    points_of_interest: Optional[Iterable[Union[PointOfInterest, Mapping[str, Any]]]] = None,
+    travel_modes: Optional[Iterable[str]] = None,
 ) -> List[MapEnrichmentResult]:
-    """Augment recommendation dictionaries with geocoding, maps, and travel time data."""
+    """Augment property recommendations with derived map metadata."""
 
-    enriched: List[MapEnrichmentResult] = []
+    poi_list: List[PointOfInterest] = []
+    if points_of_interest:
+        poi_list = [_normalise_poi(poi) for poi in points_of_interest]
 
-    for item in recommendations:
-        listing = item if isinstance(item, MutableMapping) else {}
+    results: List[MapEnrichmentResult] = []
+
+    for listing in listings:
         coordinates = _extract_coordinates(listing)
+        travel = {}
+        if coordinates and poi_list:
+            travel = estimate_travel_times(coordinates, poi_list, modes=travel_modes)
 
-        if not coordinates:
-            enriched.append(
-                MapEnrichmentResult(
-                    listing=listing,
-                    fallback_message=fallback_message,
-                    error="Missing coordinates on listing; unable to plot on map.",
-                )
-            )
-            continue
+        static_map = generate_static_map_url(listing)
 
-        lat, lon = coordinates
-        geocoding = geocode_listing_location(listing)
-        static_map = None
-        travel_times: List[TravelTimeEstimate] = []
-        error: Optional[str] = None
-        fallback: Optional[str] = None
-
-        if geocoding is None:
-            fallback = fallback_message
-
-        try:
-            static_map = generate_static_map_url(lat, lon)
-            travel_times = estimate_travel_times(lat, lon, points_of_interest)
-        except MapServiceUnavailable as exc:
-            LOGGER.debug("Map service unavailable while enriching listing: %s", exc)
-            error = str(exc)
-            fallback = fallback_message
-
-        listing_map: Dict[str, Any] = listing.setdefault("map", {})
-        listing_map.update(
-            {
-                "latitude": lat,
-                "longitude": lon,
-                "geocoding": geocoding,
-                "static_map_url": static_map,
-                "travel_times": [
-                    {
-                        "name": estimate.name,
-                        "distance_meters": estimate.distance_meters,
-                        "duration_minutes": estimate.duration_minutes,
-                    }
-                    for estimate in travel_times
-                ],
-                "fallback_message": fallback,
-            }
-        )
-
-        enriched.append(
+        results.append(
             MapEnrichmentResult(
-                listing=listing,
-                geocoding=geocoding,
+                listing_id=listing.get("id"),
+                coordinates=coordinates,
                 static_map_url=static_map,
-                travel_times=travel_times,
-                fallback_message=fallback,
-                error=error,
+                travel_times=travel,
             )
         )
 
-    return enriched
+    return results
 
 
 __all__ = [
+    "Coordinate",
     "MapEnrichmentResult",
-    "MapServiceUnavailable",
     "PointOfInterest",
     "TravelTimeEstimate",
     "enrich_recommendations_with_maps",
@@ -317,3 +242,4 @@ __all__ = [
     "generate_static_map_url",
     "geocode_listing_location",
 ]
+
