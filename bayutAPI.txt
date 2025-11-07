@@ -1,0 +1,55 @@
+App
+default-application_11213585
+
+X-RapidAPI-Key
+a61105f891msh29fbf1a012dbd26p1623efjsn6c9d00cda125
+
+Request URL
+rapidapi.com
+
+Code Snippets
+
+Target:
+Shell
+Client:
+cURL
+
+curl --request GET 
+	--url 'https://bayut-api1.p.rapidapi.com/agent/2512279?langs=ar' 
+	--header 'x-rapidapi-host: bayut-api1.p.rapidapi.com' 
+	--header 'x-rapidapi-key: a61105f891msh29fbf1a012dbd26p1623efjsn6c9d00cda125'
+
+Python: Request
+
+import requests
+
+url = "https://bayut-api1.p.rapidapi.com/agent/2512279"
+
+querystring = {"langs":"ar"}
+
+headers = {
+	"x-rapidapi-key": "a61105f891msh29fbf1a012dbd26p1623efjsn6c9d00cda125",
+	"x-rapidapi-host": "bayut-api1.p.rapidapi.com"
+}
+
+response = requests.get(url, headers=headers, params=querystring)
+
+print(response.json())
+
+Python: http.client
+
+import http.client
+
+conn = http.client.HTTPSConnection("bayut-api1.p.rapidapi.com")
+
+headers = {
+    'x-rapidapi-key': "a61105f891msh29fbf1a012dbd26p1623efjsn6c9d00cda125",
+    'x-rapidapi-host': "bayut-api1.p.rapidapi.com"
+}
+
+conn.request("GET", "/agent/2512279?langs=ar", headers=headers)
+
+res = conn.getresponse()
+data = res.read()
+
+print(data.decode("utf-8"))
