@@ -1,195 +1,120 @@
-# NeuraEstate AI Business Assistant
+# NeuraEstate Property Matcher
 
-A production-ready AI-powered business assistant for **NeuraEstate**, a UAE-based AI real estate technology company. Built with Gradio for deployment on Hugging Face Spaces.
+A LangGraph-powered AI assistant that helps NeuraEstate's clients discover Dubai properties, capture qualified leads, and collect product feedback. The system ships with a Gradio front end, orchestrated multi-agent workflow, and JSONL logging so you can run the full experience locally.
 
 ## Features
 
-- 🤖 AI-powered chatbot that answers questions about NeuraEstate
-- 📝 Automatic lead capture when users express interest
-- 💬 Feedback collection for unanswered questions
-- 📊 Health monitoring and chat history export
-- 🎨 Modern, user-friendly Gradio interface
+- **Multi-agent conversation** – Three specialised personas (preference specialist, Bayut scout, concierge) coordinate via LangGraph to collect requirements and recommend listings.
+- **Lead + feedback capture** – Conversations are monitored for buying intent and unanswered questions. Structured events are persisted to JSONL logs alongside manual form submissions.
+- **Context-aware answers** – Business collateral from the `me/` directory is loaded on startup and injected into every LangGraph run.
+- **Production ready UI** – A modern Gradio Blocks interface with chat history, agent toggles, lead forms, and health indicators.
 
-## Quick Start
+## Requirements
 
-### Local Development
+- Python 3.10 or newer (tested on Python 3.11)
+- An OpenAI API key with access to the `gpt-4o-mini` (or compatible) model
+- (Optional) Mapbox access token if you want property enrichment that depends on the `MAPS_PROVIDER`
 
-1. **Activate your environment:**
-   ```bash
-   source C:/Users/********/anaconda3/Scripts/activate ai-agentic
-   ```
+## 1. Clone the repository
 
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+git clone https://github.com/<your-org>/business_bot.git
+cd business_bot
+```
 
-3. **Set up environment variables:**
-   
-   Create a `.env` file in the project root:
-   ```env
-   OPENAI_API_KEY=your-api-key-here
-   PROVIDER=openai
-   MAPS_PROVIDER=mapbox
-   MAPBOX_ACCESS_TOKEN=your-mapbox-token
-   ```
+## 2. Create and activate a virtual environment
 
-4. **Run the app:**
-   ```bash
-   python app.py
-   ```
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows (PowerShell): .venv\Scripts\Activate.ps1
+```
 
-5. **Access the interface:**
-   
-   Open your browser to `http://localhost:7860`
+## 3. Install dependencies
 
-### Hugging Face Spaces Deployment
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-1. **Create a new Space:**
-   - Go to [Hugging Face Spaces](https://huggingface.co/spaces)
-   - Create a new Space
-   - Select "Gradio" as the SDK
-   - Set visibility (Public/Private)
+## 4. Configure environment variables
 
-2. **Clone and push your repository:**
-   ```bash
-   git clone <your-space-repo-url>
-   cd <your-space-repo>
-   # Copy your files (app.py, requirements.txt, runtime.txt, me/ folder)
-   git add .
-   git commit -m "Initial commit"
-   git push
-   ```
+Create a `.env` file in the project root:
 
-3. **Set Repository Secrets:**
-   
-   In your Space settings:
-   - Go to **Settings** → **Repository secrets**
-   - Add secret: `OPENAI_API_KEY` with your API key value
-   - Optionally add: `PROVIDER=openai`
+```env
+OPENAI_API_KEY=sk-your-key
+OPENAI_MODEL=gpt-4o-mini      # optional override, defaults to gpt-4o-mini
+PROVIDER=openai               # optional, currently only openai is implemented
+MAPS_PROVIDER=mapbox          # optional, enables map enrichment
+MAPBOX_ACCESS_TOKEN=pk.your-token  # required when MAPS_PROVIDER=mapbox
+```
 
-4. **Build and Deploy:**
-   
-   The Space will automatically build when you push. Monitor the build logs in the Space interface.
+The application reads this file automatically through `python-dotenv` when `app.py` starts. If you skip the Mapbox configuration the assistant still runs, but map-dependent features will emit a polite warning.
 
-## Project Structure
+## 5. Verify required collateral
+
+Ensure the following business context files exist:
+
+- `me/business_summary.txt`
+- `me/about_business.pdf`
+
+The included samples are loaded automatically. Replace them with your own collateral as needed.
+
+## 6. Run the application locally
+
+```bash
+python app.py
+```
+
+Gradio launches on `http://127.0.0.1:7860` by default. Open the URL in your browser to start chatting. The interface supports:
+
+- Sending free-form messages to the LangGraph workflow
+- Toggling which personas are active (useful for demos or troubleshooting)
+- Submitting leads through the sidebar form
+- Logging unresolved questions through the feedback form
+
+## 7. Review generated data
+
+Two JSONL files are maintained in the project root:
+
+- `customer_leads.jsonl` – automatic and manual leads with timestamps and metadata
+- `customer_feedback.jsonl` – unresolved questions or feedback strings
+
+Each run appends, so consider rotating these files between sessions if you want a clean slate.
+
+## 8. Run automated tests
+
+The repository ships with pytest coverage for the Bayut tool chain. With your virtual environment activated:
+
+```bash
+pytest
+```
+
+All tests should pass (expect output similar to `2 passed`).
+
+## 9. Troubleshooting
+
+- **`OPENAI_API_KEY` errors** – Confirm the key exists in `.env` and that the model specified in `OPENAI_MODEL` is available to your account.
+- **Port already in use** – Pass a different port to Gradio, e.g. edit `demo.queue(...).launch(server_port=7861)` inside `app.py`.
+- **Offline fallback** – If the OpenAI client errors, each persona emits a heuristic response so the UI stays responsive. Fix your network/API key to regain full-quality answers.
+
+## 10. Optional: Deploy to Hugging Face Spaces
+
+The app runs unmodified on Hugging Face Spaces using the `gradio` SDK. Create a new Space, push the repository contents, and add the same environment variables as repository secrets.
+
+## Project structure
 
 ```
 business_bot/
-├── .env                    # Local environment variables (not committed)
-├── app.py                  # Main Gradio application
-├── requirements.txt        # Python dependencies
-├── runtime.txt            # Python version specification
-├── README.md              # This file
-├── me/
-│   ├── about_business.pdf # Business information (PDF)
-│   └── business_summary.txt # Business summary (text)
-└── logs/                  # Auto-created directory
-    ├── leads.jsonl        # Customer leads (auto-generated)
-    └── feedback.jsonl     # Customer feedback (auto-generated)
+├── app.py                     # Gradio entrypoint
+├── agents/                    # LangGraph personas and tooling
+├── customer_leads.jsonl       # Lead log (auto-created)
+├── customer_feedback.jsonl    # Feedback log (auto-created)
+├── me/                        # Business collateral loaded into the assistant
+├── requirements.txt           # Python dependencies
+├── tests/                     # Pytest suite
+└── README.md                  # This document
 ```
 
-## Configuration
+## Support
 
-### Environment Variables
-
-- `OPENAI_API_KEY` (required): Your OpenAI API key
-- `PROVIDER` (optional): LLM provider, defaults to "openai"
-- `MAPS_PROVIDER` (optional): Maps provider used for enrichment. Currently `mapbox` is supported and enabled by default.
-- `MAPBOX_ACCESS_TOKEN` (required when `MAPS_PROVIDER=mapbox`): Mapbox access token with Static Images and Matrix API permissions.
-- `MAPBOX_STATIC_STYLE` (optional): Override the Mapbox style used for static map images (defaults to `mapbox/streets-v12`).
-- `MAPBOX_PROFILE` (optional): Routing profile used for travel-time estimation (defaults to `mapbox/driving`).
-
-When map credentials are missing or temporarily unavailable, property recommendations still render but include a guardrail message letting users know that map details will be shared once the map service reconnects.
-
-### Files Required
-
-The app expects these files in the `me/` directory:
-- `business_summary.txt`: Text summary of NeuraEstate
-- `about_business.pdf`: Additional business information
-
-## Usage
-
-### Chat Interface
-
-1. Type your questions in the message box
-2. The assistant will answer based on the loaded business context
-3. If you express interest (mention buying, selling, contact info), your information will be automatically captured
-
-### Lead Capture Form
-
-Use the sidebar form to directly submit your contact information:
-1. Fill in your Name and Email
-2. Add any notes about your interest
-3. Click "Submit Lead"
-
-### Export Chat History
-
-Click the "📥 Export Chat History" button to download your conversation as JSON.
-
-### Health Check
-
-The sidebar shows system health status. Click "🔄 Refresh Health" to update.
-
-## Logs
-
-The app automatically creates a `logs/` directory and writes:
-- `leads.jsonl`: Customer leads (one JSON object per line)
-- `feedback.jsonl`: Unanswered questions/feedback (one JSON object per line)
-
-Each entry includes:
-- `timestamp`: ISO 8601 UTC timestamp
-- Relevant fields (name, email, message, question)
-
-## Troubleshooting
-
-### "API Key Missing" Warning
-
-**Local:**
-- Ensure `.env` file exists with `OPENAI_API_KEY=your-key`
-- Check that `python-dotenv` is installed
-
-**Hugging Face Spaces:**
-- Go to Space Settings → Repository secrets
-- Add `OPENAI_API_KEY` secret with your key value
-- Rebuild the Space
-
-### Business Context Not Loading
-
-- Ensure `me/business_summary.txt` and `me/about_business.pdf` exist
-- Check file permissions (readable)
-- Review console logs for specific error messages
-
-### Build Failures on Spaces
-
-- Check `runtime.txt` specifies a valid Python version (3.10+)
-- Verify all dependencies in `requirements.txt` are available
-- Review build logs in the Spaces interface
-
-## Development
-
-### Code Structure
-
-- **LLM Adapter**: Thin abstraction layer for LLM providers (`LLM` class)
-- **Tool Functions**: `record_customer_interest()`, `record_feedback()`
-- **Heuristics**: Automatic detection of lead intent and uncertainty
-- **Gradio UI**: Blocks-based interface with sidebar and main chat
-
-### Adding New Providers
-
-Extend the `LLM` class in `app.py`:
-
-```python
-if self.provider == "your_provider":
-    # Initialize your provider client
-    # Implement chat() method
-```
-
-## License
-
-This project is for educational/demo purposes.
-
-## Contact
-
-For questions about NeuraEstate, contact through the chatbot interface.
-
+For issues specific to NeuraEstate operations, reach out via the chatbot or your internal NeuraEstate support channel. For bugs in this repository, open a GitHub issue with logs and reproduction steps.
